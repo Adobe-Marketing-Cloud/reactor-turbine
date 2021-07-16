@@ -22,7 +22,12 @@ describe('function returned by createModuleProvider', function () {
   var displayName = 'Foo';
   var moduleExports = {};
   var extractModuleExports = require('../extractModuleExports');
+  var createModuleProvider;
   var extractModuleExportsSpy;
+  var traverseDelegatePropertiesSpy;
+  var decorateWithDynamicHostSpy;
+  var isDynamicEnforced;
+  var turbineRequire;
   var moduleProvider;
 
   beforeEach(function () {
@@ -31,12 +36,29 @@ describe('function returned by createModuleProvider', function () {
       .createSpy('extractModuleExports')
       .and.callFake(extractModuleExports);
 
-    var createModuleProvider = injectCreateModuleProvider({
+    createModuleProvider = injectCreateModuleProvider({
       './logger': logger,
       './extractModuleExports': extractModuleExportsSpy
     });
 
-    moduleProvider = createModuleProvider();
+    traverseDelegatePropertiesSpy = {
+      pluckSettingsValue: jasmine.createSpy(),
+      pushValueIntoSettings: jasmine.createSpy()
+    };
+
+    isDynamicEnforced = false;
+    decorateWithDynamicHostSpy = jasmine
+      .createSpy()
+      .and.callFake(function (url) {
+        // simply reflect the url when isDynamicEnforced = false
+        return url;
+      });
+
+    moduleProvider = createModuleProvider(
+      traverseDelegatePropertiesSpy,
+      isDynamicEnforced,
+      decorateWithDynamicHostSpy
+    );
 
     var module = {
       name: name,
@@ -46,7 +68,7 @@ describe('function returned by createModuleProvider', function () {
       }
     };
 
-    var require = function (path) {
+    turbineRequire = function (path) {
       return path;
     };
 
@@ -54,7 +76,7 @@ describe('function returned by createModuleProvider', function () {
       referencePath,
       module,
       extensionName,
-      require
+      turbineRequire
     );
   });
 
@@ -109,5 +131,205 @@ describe('function returned by createModuleProvider', function () {
     expect(function () {
       moduleProvider.getModuleExports('hello-world/src/invalid.js');
     }).toThrowError('Module hello-world/src/invalid.js not found.');
+  });
+
+  describe('decorateSettingsWithDelegateFilePaths', function () {
+    var relativeUrl = '/some/relative/url';
+    var moduleReferencePath = 'some-module-reference-path';
+    var module = {
+      referencePath: moduleReferencePath,
+      filePaths: ['a.b[2].c.sourceUrl']
+    };
+    var settings = {
+      a: {
+        b: [
+          0,
+          1,
+          {
+            c: {
+              sourceUrl: relativeUrl
+            }
+          }
+        ]
+      }
+    };
+
+    beforeEach(function () {
+      isDynamicEnforced = true;
+      decorateWithDynamicHostSpy = jasmine
+        .createSpy()
+        .and.callFake(function (url) {
+          return 'https://adobe.com' + url;
+        });
+      traverseDelegatePropertiesSpy = {
+        pluckSettingsValue: jasmine.createSpy().and.returnValue(relativeUrl),
+        pushValueIntoSettings: jasmine.createSpy()
+      };
+      moduleProvider = createModuleProvider(
+        traverseDelegatePropertiesSpy,
+        isDynamicEnforced,
+        decorateWithDynamicHostSpy
+      );
+    });
+
+    it('does not blow up with undefined', function () {
+      expect(function () {
+        moduleProvider.decorateSettingsWithDelegateFilePaths(
+          undefined,
+          undefined,
+          undefined
+        );
+      }).not.toThrow();
+    });
+
+    describe('module tests', function () {
+      it('does not decorate urls when dynamic host is turned off', function () {
+        isDynamicEnforced = false;
+        moduleProvider = createModuleProvider(
+          traverseDelegatePropertiesSpy,
+          isDynamicEnforced,
+          decorateWithDynamicHostSpy
+        );
+
+        moduleProvider.decorateSettingsWithDelegateFilePaths(
+          settings,
+          module.filePaths,
+          moduleReferencePath
+        );
+
+        expect(
+          traverseDelegatePropertiesSpy.pluckSettingsValue
+        ).not.toHaveBeenCalled();
+        expect(
+          traverseDelegatePropertiesSpy.pushValueIntoSettings
+        ).not.toHaveBeenCalled();
+        expect(decorateWithDynamicHostSpy).not.toHaveBeenCalled();
+      });
+
+      it('decorates flagged url settings with the dynamic host', function () {
+        moduleProvider.registerModule(
+          moduleReferencePath,
+          module,
+          'some-extension',
+          turbineRequire
+        );
+
+        moduleProvider.decorateSettingsWithDelegateFilePaths(
+          settings,
+          module.filePaths,
+          moduleReferencePath
+        );
+
+        expect(
+          traverseDelegatePropertiesSpy.pluckSettingsValue.calls.count()
+        ).toBe(1);
+        expect(
+          traverseDelegatePropertiesSpy.pushValueIntoSettings.calls.count()
+        ).toBe(1);
+        expect(
+          traverseDelegatePropertiesSpy.pushValueIntoSettings
+        ).toHaveBeenCalledWith(
+          'a.b[2].c.sourceUrl',
+          settings,
+          'https://adobe.com' + relativeUrl
+        );
+      });
+
+      describe('handles the Adobe Custom Code action correctly', function () {
+        beforeEach(function () {
+          moduleReferencePath = 'core/src/lib/actions/customCode.js';
+
+          moduleProvider.registerModule(
+            moduleReferencePath,
+            {
+              referencePath: moduleReferencePath,
+              filePaths: ['source']
+            },
+            'customCodeAction',
+            turbineRequire
+          );
+        });
+
+        it('does not transform when isExternal is not present', function () {
+          settings = {
+            source: 'some source code',
+            isExternal: undefined
+          };
+          var filePaths = ['source'];
+
+          moduleProvider.decorateSettingsWithDelegateFilePaths(
+            settings,
+            filePaths,
+            moduleReferencePath
+          );
+
+          expect(
+            traverseDelegatePropertiesSpy.pushValueIntoSettings
+          ).not.toHaveBeenCalled();
+        });
+
+        it('transforms when isExternal=true', function () {
+          settings = {
+            source: 'some/relative/url',
+            isExternal: true
+          };
+          var filePaths = ['source'];
+
+          moduleProvider.decorateSettingsWithDelegateFilePaths(
+            settings,
+            filePaths,
+            moduleReferencePath
+          );
+          expect(
+            traverseDelegatePropertiesSpy.pushValueIntoSettings
+          ).toHaveBeenCalledWith(
+            'source',
+            settings,
+            'https://adobe.com/some/relative/url'
+          );
+        });
+      });
+    });
+
+    describe('extension settings tests', function () {
+      it('does not require a module path', function () {
+        expect(1).toBe(1);
+      });
+    });
+
+    // it('Begins building a cache of settings for the same module path', function () {
+    //   moduleProvider.registerModule(
+    //     referencePath,
+    //     module,
+    //     'some-extension',
+    //     turbineRequire
+    //   );
+    //
+    //   // call once
+    //   moduleProvider.decorateSettingsWithDelegateFilePaths(
+    //     referencePath,
+    //     settings
+    //   );
+    //
+    //   // call twice, should be cached
+    //   moduleProvider.decorateSettingsWithDelegateFilePaths(
+    //     referencePath,
+    //     settings
+    //   );
+    //
+    //   expect(
+    //     traverseDelegatePropertiesSpy.pluckSettingsValue.calls.count()
+    //   ).toBe(1); // stored in cache, so this isn't called again
+    //   expect(
+    //     traverseDelegatePropertiesSpy.pushValueIntoSettings.calls.count()
+    //   ).toBe(2); // every call still pushes into the settings from cache
+    //   expect(
+    //     traverseDelegatePropertiesSpy.pushValueIntoSettings
+    //   ).toHaveBeenCalledWith(
+    //     'a.b[2].c.sourceUrl',
+    //     settings,
+    //     'https://adobe.com' + relativeUrl
+    //   );
+    // });
   });
 });

@@ -10,6 +10,9 @@
  * governing permissions and limitations under the License.
  ****************************************************************************************/
 
+// DYNAMIC URL
+var document = require('@adobe/reactor-document');
+var createDynamicHostResolver = require('./createDynamicHostResolver');
 var buildRuleExecutionOrder = require('./buildRuleExecutionOrder');
 
 var createDebugController = require('./createDebugController');
@@ -48,6 +51,10 @@ var getNamespacedStorage = require('./getNamespacedStorage');
 
 var hydrateModuleProvider = require('./hydrateModuleProvider');
 var hydrateSatelliteObject = require('./hydrateSatelliteObject');
+var IEGetTurbineScript = require('../temporaryHelpers/findPageScript')
+  .getTurbine;
+
+var traverseDelegateProperties = require('./traverseDelegateProperties');
 
 var logger = require('./logger');
 
@@ -61,6 +68,27 @@ if (_satellite && !window.__satelliteLoaded) {
 
   // Remove container in public scope ASAP so it can't be manipulated by extension or user code.
   delete _satellite.container;
+
+  // DYNAMIC URL
+  var currentScriptSource = '';
+  if (document.currentScript && document.currentScript.getAttribute('src')) {
+    currentScriptSource = document.currentScript.getAttribute('src');
+  } else if (IEGetTurbineScript()) {
+    currentScriptSource = IEGetTurbineScript().getAttribute('src');
+  }
+  var dynamicHostResolver;
+  try {
+    dynamicHostResolver = createDynamicHostResolver(
+      currentScriptSource,
+      container.company.cdnAllowList
+    );
+  } catch (e) {
+    logger.warn('Please review the following error:');
+    throw e; // We don't want to continue allowing Turbine to start up if we detect an error in here
+  }
+
+  window.dynamicHostResolver = dynamicHostResolver;
+  console.log('added dynamic host resolver to the window');
 
   var undefinedVarsReturnEmpty =
     container.property.settings.undefinedVarsReturnEmpty;
@@ -76,7 +104,11 @@ if (_satellite && !window.__satelliteLoaded) {
     return dataElements[name];
   };
 
-  var moduleProvider = createModuleProvider();
+  var moduleProvider = createModuleProvider(
+    traverseDelegateProperties,
+    dynamicHostResolver.isDynamicEnforced,
+    dynamicHostResolver.decorateWithDynamicHost
+  );
 
   var replaceTokens;
 
@@ -132,7 +164,8 @@ if (_satellite && !window.__satelliteLoaded) {
     moduleProvider,
     debugController,
     replaceTokens,
-    getDataElementValue
+    getDataElementValue,
+    dynamicHostResolver.decorateWithDynamicHost
   );
 
   var notifyMonitors = createNotifyMonitors(_satellite);

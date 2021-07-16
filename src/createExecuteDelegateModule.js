@@ -23,10 +23,25 @@ module.exports = function (moduleProvider, replaceTokens) {
       throw new Error(MODULE_NOT_FUNCTION_ERROR);
     }
 
-    var settings = replaceTokens(
+    // dynamically replace the host on the module settings
+    var moduleDefinition = moduleProvider.getModuleDefinition(
+      moduleDescriptor.modulePath
+    );
+    var moduleFilePaths = Array.isArray(moduleDefinition.filePaths)
+      ? moduleDefinition.filePaths
+      : [];
+    var settingsWithReplacedDynamicURLs = moduleProvider.decorateSettingsWithDelegateFilePaths(
       moduleDescriptor.settings || {},
+      moduleFilePaths,
+      moduleDescriptor.modulePath
+    );
+    // replace tokens
+    var moduleDescriptorSettings = replaceTokens(
+      settingsWithReplacedDynamicURLs,
       syntheticEvent
     );
-    return moduleExports.bind(null, settings).apply(null, moduleCallParameters);
+    return moduleExports
+      .bind(null, moduleDescriptorSettings)
+      .apply(null, moduleCallParameters);
   };
 };

@@ -22,7 +22,8 @@ module.exports = function (
   moduleProvider,
   debugController,
   replaceTokens,
-  getDataElementValue
+  getDataElementValue,
+  decorateWithDynamicHost
 ) {
   var extensions = container.extensions;
   var buildInfo = container.buildInfo;
@@ -36,14 +37,22 @@ module.exports = function (
 
     Object.keys(extensions).forEach(function (extensionName) {
       var extension = extensions[extensionName];
+      var extensionSettings = extension.settings;
+      if (Array.isArray(extension.filePaths)) {
+        extensionSettings = moduleProvider.decorateSettingsWithDelegateFilePaths(
+          extensionSettings,
+          extension.filePaths
+        );
+      }
       var getExtensionSettings = createGetExtensionSettings(
         replaceTokens,
-        extension.settings
+        extensionSettings
       );
 
       if (extension.modules) {
         var prefixedLogger = logger.createPrefixedLogger(extension.displayName);
         var getHostedLibFileUrl = createGetHostedLibFileUrl(
+          decorateWithDynamicHost,
           extension.hostedLibFilesBaseUrl,
           buildInfo.minified
         );

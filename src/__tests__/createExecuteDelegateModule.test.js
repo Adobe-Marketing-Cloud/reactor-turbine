@@ -27,7 +27,11 @@ describe('createExecuteDelegateModule returns a function that when called', func
       .createSpy('getModuleExports')
       .and.returnValue(moduleExportsSpy);
 
-    var moduleProvider = { getModuleExports: getModuleExportsSpy };
+    var moduleProvider = {
+      getModuleExports: getModuleExportsSpy,
+      decorateSettingsWithDelegateFilePaths: jasmine.createSpy(),
+      getModuleDefinition: jasmine.createSpy().and.returnValue({})
+    };
     var replaceTokens = emptyFn;
 
     expect(
@@ -50,7 +54,9 @@ describe('createExecuteDelegateModule returns a function that when called', func
       var moduleProvider = {
         getModuleExports: function () {
           return moduleExportsSpy;
-        }
+        },
+        decorateSettingsWithDelegateFilePaths: jasmine.createSpy(),
+        getModuleDefinition: jasmine.createSpy().and.returnValue({})
       };
       var replaceTokens = emptyFn;
 
@@ -67,7 +73,9 @@ describe('createExecuteDelegateModule returns a function that when called', func
     var moduleProvider = {
       getModuleExports: function () {
         return 5;
-      }
+      },
+      decorateSettingsWithDelegateFilePaths: jasmine.createSpy(),
+      getModuleDefinition: jasmine.createSpy().and.returnValue({})
     };
     var replaceTokens = emptyFn;
 
@@ -91,7 +99,9 @@ describe('createExecuteDelegateModule returns a function that when called', func
     var moduleProvider = {
       getModuleExports: function () {
         return moduleExportsSpy;
-      }
+      },
+      decorateSettingsWithDelegateFilePaths: jasmine.createSpy(),
+      getModuleDefinition: jasmine.createSpy().and.returnValue({})
     };
     var replaceTokens = function () {
       return { key: 'replaced tokens value' };
@@ -117,7 +127,13 @@ describe('createExecuteDelegateModule returns a function that when called', func
       var moduleProvider = {
         getModuleExports: function () {
           return emptyFn;
-        }
+        },
+        decorateSettingsWithDelegateFilePaths: jasmine
+          .createSpy()
+          .and.callFake(function (settings) {
+            return settings;
+          }),
+        getModuleDefinition: jasmine.createSpy().and.returnValue({})
       };
 
       createExecuteDelegateModule(moduleProvider, replaceTokensSpy)(
@@ -129,4 +145,67 @@ describe('createExecuteDelegateModule returns a function that when called', func
       expect(replaceTokensSpy).toHaveBeenCalledWith({}, event);
     }
   );
+
+  describe('the function moduleProvider.decorateSettingsWithDelegateFilePaths', function () {
+    it('is handed the settings to decorate, the filePaths, and the modulePath', function () {
+      var replaceTokens = function () {};
+      var moduleDescriptor = {
+        modulePath: 'module path',
+        settings: {
+          someUrl: 'https://test.com'
+        }
+      };
+      var moduleProvider = {
+        getModuleExports: function () {
+          return emptyFn;
+        },
+        decorateSettingsWithDelegateFilePaths: jasmine.createSpy(),
+        getModuleDefinition: jasmine.createSpy().and.returnValue({
+          filePaths: ['source']
+        })
+      };
+
+      createExecuteDelegateModule(moduleProvider, replaceTokens)(
+        moduleDescriptor,
+        event,
+        moduleCallParameters
+      );
+
+      expect(
+        moduleProvider.decorateSettingsWithDelegateFilePaths
+      ).toHaveBeenCalledWith(
+        moduleDescriptor.settings,
+        ['source'],
+        moduleDescriptor.modulePath
+      );
+    });
+
+    it(
+      'is called with an empty settings object if moduleDescriptor.settings ' +
+        ' is missing',
+      function () {
+        var replaceTokens = function () {};
+        var moduleDescriptor = {
+          modulePath: 'module path'
+        };
+        var moduleProvider = {
+          getModuleExports: function () {
+            return emptyFn;
+          },
+          decorateSettingsWithDelegateFilePaths: jasmine.createSpy(),
+          getModuleDefinition: jasmine.createSpy().and.returnValue({})
+        };
+
+        createExecuteDelegateModule(moduleProvider, replaceTokens)(
+          moduleDescriptor,
+          event,
+          moduleCallParameters
+        );
+
+        expect(
+          moduleProvider.decorateSettingsWithDelegateFilePaths
+        ).toHaveBeenCalledWith({}, [], moduleDescriptor.modulePath);
+      }
+    );
+  });
 });

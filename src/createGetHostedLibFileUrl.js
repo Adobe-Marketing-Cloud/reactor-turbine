@@ -17,7 +17,11 @@
  * @returns {Function}
  */
 
-module.exports = function (hostedLibFilesBaseUrl, minified) {
+module.exports = function (
+  decorateWithDynamicHost,
+  hostedLibFilesBaseUrl,
+  minified
+) {
   return function (file) {
     if (minified) {
       var fileParts = file.split('.');
@@ -25,6 +29,6 @@ module.exports = function (hostedLibFilesBaseUrl, minified) {
       file = fileParts.join('.');
     }
 
-    return hostedLibFilesBaseUrl + file;
+    return decorateWithDynamicHost(hostedLibFilesBaseUrl) + file;
   };
 };

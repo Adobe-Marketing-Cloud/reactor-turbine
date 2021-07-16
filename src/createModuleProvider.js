@@ -10,10 +10,15 @@
  * governing permissions and limitations under the License.
  ****************************************************************************************/
 
+var objectAssign = require('@adobe/reactor-object-assign');
 var extractModuleExports = require('./extractModuleExports');
 var logger = require('./logger');
 
-module.exports = function () {
+module.exports = function (
+  traverseDelegateProperties,
+  isDynamicEnforced,
+  decorateWithDynamicHost
+) {
   var moduleByReferencePath = {};
 
   var getModule = function (referencePath) {
@@ -75,6 +80,77 @@ module.exports = function () {
     return module.exports;
   };
 
+  /**
+   * Stored by reference path, holds the modules settings that need to be transformed
+   * into a dynamic URL.
+   * {
+   *  'referencePath': {
+   *     'setting.nested[4].path': 'relative-url'
+   *   }
+   * }
+   *
+   * @param settings - The settings to decorate
+   * @param filePaths - The list of paths down to each setting that needs to transform
+   * @param [moduleReferencePath] - If the filePaths come from a module, declare which one
+   */
+  var decorateSettingsWithDelegateFilePaths = function (
+    settings,
+    filePaths,
+    moduleReferencePath
+  ) {
+    // nothing to do
+    if (
+      !isDynamicEnforced ||
+      !settings ||
+      !Object.keys(settings).length ||
+      !Array.isArray(filePaths) ||
+      !filePaths.length
+    ) {
+      return settings;
+    }
+
+    var settingsCopy = objectAssign({}, settings);
+
+    // pull out the file paths by the module's reference path and loop over each urlPath
+    filePaths.forEach(function (urlSettingPath) {
+      // The custom code action provides the ability to have the source code in the 'source'
+      // variable or to have an external file. Therefore, this module has 2 behaviors.
+      // It also does not provide a value of false for isExternal just as all other extensions
+      // that use fileTransform do not provide an isExternal variable check. Therefore, we need
+      // to treat Adobe's custom code action special, and don't augment the 'source' variable
+      // if isExternal is not also present.
+
+      var isAdobeCustomCodeAction = Boolean(
+        moduleReferencePath != null &&
+          /^core\/.*actions.*\/customCode\.js$/.test(moduleReferencePath)
+      );
+      if (
+        isAdobeCustomCodeAction &&
+        urlSettingPath === 'source' &&
+        !settingsCopy.isExternal
+      ) {
+        return;
+      }
+
+      var url = traverseDelegateProperties.pluckSettingsValue(
+        urlSettingPath,
+        settingsCopy
+      );
+      if (url) {
+        // NOTE: without caching, it might be worth while to allow pushValueIntoSettings
+        // to modify the passed in settings object. Leaving it for now in case we want to cache.
+        settingsCopy = traverseDelegateProperties.pushValueIntoSettings(
+          urlSettingPath,
+          settingsCopy,
+          decorateWithDynamicHost(url)
+        );
+      }
+    });
+
+    // return the decorated settings object
+    return settingsCopy;
+  };
+
   var getModuleDefinition = function (referencePath) {
     return getModule(referencePath).definition;
   };
@@ -88,6 +164,7 @@ module.exports = function () {
     hydrateCache: hydrateCache,
     getModuleExports: getModuleExports,
     getModuleDefinition: getModuleDefinition,
-    getModuleExtensionName: getModuleExtensionName
+    getModuleExtensionName: getModuleExtensionName,
+    decorateSettingsWithDelegateFilePaths: decorateSettingsWithDelegateFilePaths
   };
 };
